@@ -136,6 +136,7 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
 .fig{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:.88rem;background:var(--surface)}
 .fig.done{border-color:var(--good);color:var(--good);font-weight:700}
 .empty{color:var(--muted);padding:24px 4px}
+.wl{margin:6px 0 0;padding-left:1.2rem;display:flex;flex-direction:column;gap:2px}
 .foot{color:var(--muted);font-size:.85rem;margin:0}
 @media (prefers-reduced-motion:reduce){.ball.roll{animation:none}}
 </style>
@@ -192,6 +193,23 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
           </div>
         </div>
         <div class="board" id="board"></div>
+      </div>
+    </div>
+    <div class="two" style="margin-top:18px">
+      <div class="panel">
+        <h2>¿Gritaron Bingo?</h2>
+        <p class="hint">Escriba el número del cartón (o su código) para validarlo y ver quién es el jugador.</p>
+        <div class="vrow" style="margin-top:12px">
+          <div class="field">
+            <label for="qnum">Número de cartón</label>
+            <input type="text" id="qnum" class="code" maxlength="12" placeholder="37" autocomplete="off" inputmode="text">
+          </div>
+          <button type="button" class="btn primary" id="qgo">Validar</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Cartones ganadores</h2>
+        <div id="winners"></div>
       </div>
     </div>
   </section>
@@ -253,8 +271,8 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
       <p class="hint">Jugadores: escriban su código y toquen cada número cuando se cante. Para validar un Bingo, el anfitrión escribe el código del jugador en su propia pantalla.</p>
       <div class="vrow" style="margin-top:12px">
         <div class="field">
-          <label for="codeIn">Código del cartón</label>
-          <input type="text" id="codeIn" class="code" maxlength="12" placeholder="K7QF-3MXD" autocomplete="off" spellcheck="false">
+          <label for="codeIn">Número o código del cartón</label>
+          <input type="text" id="codeIn" class="code" maxlength="12" placeholder="37 o K7QF-3MXD" autocomplete="off" spellcheck="false">
         </div>
         <button type="button" class="btn primary" id="check">Revisar</button>
       </div>
@@ -284,7 +302,11 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
   function sha256(t){return crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)).then(function(b){return Array.prototype.map.call(new Uint8Array(b),function(x){return ('0'+x.toString(16)).slice(-2);}).join('');});}
   function newCode(){var s='';for(var i=0;i<8;i++)s+=ALPHA.charAt(randInt(ALPHA.length));return s;}
   function fmtCode(c){return c.slice(0,4)+'-'+c.slice(4);}
-  function normCode(s){return String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');}
+  function normCode(s){
+    var c=String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(/^\d{1,3}$/.test(c)){var n=parseInt(c,10);if(n>=1&&n<=100)return numCode(n);}
+    return c;
+  }
 
   /* ---------- cartón a partir del código ---------- */
   function xmur3(s){var h=1779033703^s.length,i;for(i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return function(){h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);return (h^=h>>>16)>>>0;};}
@@ -356,7 +378,21 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
     var rec=state.seq.slice(Math.max(0,d-8),d).reverse().map(function(n){return '<span class="chip" style="--lc:'+lv(n)+'">'+letterOf(n)+' '+n+'</span>';}).join('');
     $('recent').innerHTML=rec;
     Array.prototype.forEach.call($('pat').children,function(b){b.setAttribute('aria-pressed',b.getAttribute('data-p')===state.pattern?'true':'false');});
-    renderBoard();renderControls();
+    renderBoard();renderControls();renderWinners();
+  }
+  function plabel(p){return (numOf(p.code)?'Cartón '+numOf(p.code):fmtCode(p.code))+' · '+esc(p.name);}
+  function renderWinners(){
+    var el=$('winners');
+    if(!state.players.length){el.innerHTML='<p class="hint">Todavía no hay jugadores registrados.</p>';return;}
+    if(state.drawn===0){el.innerHTML='<p class="hint">El sorteo no ha empezado. Aquí aparecerán los cartones que completen '+PAT[state.pattern].toLowerCase()+'.</p>';return;}
+    var called=calledSet(),sel=state.pattern;
+    var res=state.players.map(function(p){return {p:p,m:missing(cardFor(p.code),called,sel)};});
+    var win=res.filter(function(r){return r.m===0;});
+    function list(arr){var top=arr.slice(0,8).map(function(r){return '<li>'+plabel(r.p)+'</li>';}).join('');return '<ul class="wl">'+top+(arr.length>8?'<li>y '+(arr.length-8)+' más</li>':'')+'</ul>';}
+    if(win.length){el.innerHTML='<p class="ok">Completan '+PAT[sel].toLowerCase()+':</p>'+list(win);return;}
+    var best=Math.min.apply(null,res.map(function(r){return r.m;}));
+    var near=res.filter(function(r){return r.m===best;});
+    el.innerHTML='<p class="hint">Ningún cartón completa '+PAT[sel].toLowerCase()+' todavía. Los más cerca están a '+best+' número'+(best===1?'':'s')+':</p>'+list(near);
   }
   function renderFair(){
     $('hash').textContent=state.hash||'Calculando huella…';
@@ -403,6 +439,7 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
 
   /* ---------- cartones ---------- */
   function renderPlayers(){
+    renderWinners();
     var locked=state.drawn>0||state.revealed,ps=state.players;
     $('addp').disabled=locked;$('names').disabled=locked;
     var lk=$('lock');lk.hidden=!locked;
@@ -467,7 +504,7 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
   function renderVerify(){
     var code=normCode($('codeIn').value),out=$('vres');
     if(!code){out.innerHTML='<p class="empty">Escribe un código para ver su cartón y comprobar si completa la figura.</p>';return;}
-    if(code.length!==8){out.innerHTML='<p class="empty">Los códigos tienen 8 caracteres, por ejemplo K7QF-3MXD.</p>';return;}
+    if(code.length!==8){out.innerHTML='<p class="empty">Escriba un número de cartón del 1 al 100 o un código de 8 caracteres, por ejemplo 37 o K7QF-3MXD.</p>';return;}
     var called=calledSet(),grid=cardFor(code),reg=state.players.filter(function(p){return p.code===code;})[0];
     var sel=state.pattern,miss={};
     Object.keys(PAT).forEach(function(p){miss[p]=missing(grid,called,p);});
@@ -535,6 +572,9 @@ td.act{display:flex;gap:6px;flex-wrap:wrap}
   });
   $('addp').addEventListener('click',addPlayers);
   $('addn').addEventListener('click',addNum);
+  function quick(){var v=$('qnum').value.trim();if(!v)return;$('codeIn').value=v;showTab('verificar');}
+  $('qgo').addEventListener('click',quick);
+  $('qnum').addEventListener('keydown',function(e){if(e.key==='Enter')quick();});
   $('nnum').addEventListener('input',function(){$('nmsg').textContent='';renderNum();});
   $('check').addEventListener('click',renderVerify);
   $('codeIn').addEventListener('input',renderVerify);
